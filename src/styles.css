@@ -1,0 +1,443 @@
+@import "./brand/tokens.css";
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  overflow: hidden;
+  font: 15px/1.4 system-ui, sans-serif;
+  color: var(--text);
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  overscroll-behavior: none;
+}
+#app {
+  position: fixed;
+  inset: 0;
+}
+#scene {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+#ui {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+#ui.menu {
+  pointer-events: auto;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(6px);
+}
+#ui button,
+#ui select,
+#ui input,
+#ui .panel,
+#ui .card {
+  pointer-events: auto;
+}
+
+/* --- shared controls --- */
+.btn {
+  min-height: 48px;
+  padding: 0 22px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--control);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn:active {
+  transform: scale(0.97);
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.btn.primary:hover {
+  background: var(--accent-hover);
+}
+.btn.ghost {
+  background: transparent;
+}
+.btn.small {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 10px;
+}
+.panel {
+  background: var(--surface-solid);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 22px;
+  box-shadow: var(--shadow);
+  max-width: 420px;
+  width: min(92vw, 420px);
+}
+.muted {
+  color: var(--text-muted);
+}
+.small {
+  font-size: 13px;
+}
+
+/* --- full screens --- */
+.screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px 16px;
+  text-align: center;
+}
+.screen.title h1 {
+  margin: 8px 0 0;
+  font-size: 34px;
+  letter-spacing: 0.3px;
+}
+.screen.title .tagline {
+  margin: 0 0 18px;
+  color: var(--text-muted);
+}
+.screen.title .btn {
+  width: min(78vw, 300px);
+}
+.screen.title .lockup {
+  display: block;
+  max-width: 60vw;
+  height: auto;
+}
+.screen.title .foot {
+  margin-top: 28px;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+.screen.levels {
+  justify-content: flex-start;
+  padding-top: 12px;
+}
+.bar {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.bar h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.grid {
+  width: 100%;
+  max-width: 560px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  overflow-y: auto;
+  padding-bottom: 24px;
+}
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 92px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface-solid);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.card .num {
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 700;
+}
+.card .name {
+  font-weight: 700;
+}
+.card .meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.card.locked {
+  opacity: 0.45;
+  cursor: default;
+}
+.card .lock {
+  margin-top: auto;
+}
+.stars {
+  display: inline-flex;
+  gap: 2px;
+  color: var(--text-faint);
+  font-size: 14px;
+}
+.stars .star.on {
+  color: var(--accent);
+}
+.stars.big {
+  font-size: 40px;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+.stars.big .star {
+  transform: scale(0.6);
+  opacity: 0;
+  animation: pop 0.45s cubic-bezier(0.2, 1.4, 0.4, 1) forwards;
+}
+.stars.big .star:nth-child(2) { animation-delay: 0.15s; }
+.stars.big .star:nth-child(3) { animation-delay: 0.3s; }
+@keyframes pop {
+  to { transform: scale(1); opacity: 1; }
+}
+
+/* --- HUD --- */
+.hud {
+  position: absolute;
+  inset: 0;
+}
+.hud-top {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.hud-title {
+  pointer-events: none;
+  flex: 1;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+.hud-title .num {
+  color: var(--accent);
+  margin-right: 4px;
+}
+.balls {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.balls .ball {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: inset -2px -2px 3px rgba(0, 0, 0, 0.35);
+}
+.balls .ball.used {
+  opacity: 0.2;
+}
+.hud-bottom {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 22px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.progress {
+  position: relative;
+  flex: 1;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  overflow: visible;
+}
+.progress .fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.15s ease-out;
+}
+.progress .fill.met {
+  background: var(--brand-orange-300);
+}
+.progress .tick {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  background: var(--text);
+  transform: translateX(-1px);
+}
+.progress .tick span {
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.hud .pct {
+  min-width: 46px;
+  text-align: right;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+.hint {
+  position: absolute;
+  left: 50%;
+  bottom: 64px;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+  transition: opacity 0.4s;
+}
+.hint.gone {
+  opacity: 0;
+}
+
+/* --- overlays --- */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  pointer-events: auto;
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+.overlay.in {
+  opacity: 1;
+}
+.overlay .panel {
+  text-align: center;
+}
+.overlay h2 {
+  margin: 0 0 6px;
+}
+.overlay .row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+.overlay .col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+.result.won h2 {
+  color: var(--accent);
+}
+.settings {
+  text-align: left;
+}
+.settings .opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  border-bottom: 1px solid var(--border);
+}
+.settings .opt input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--accent);
+}
+.settings select {
+  background: var(--control);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+}
+.settings .opt.file {
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 10px 0;
+}
+.settings .btn {
+  width: 100%;
+  margin-top: 14px;
+}
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 96px;
+  transform: translate(-50%, 12px);
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: var(--surface-solid);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  opacity: 0;
+  transition: all 0.25s;
+  pointer-events: none;
+}
+.toast.in {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* Engine's unsupported card */
+.unsupported {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  color: var(--text);
+}
+.unsupported-card {
+  text-align: center;
+  max-width: 320px;
+  padding: 24px;
+}
+.unsupported-emoji {
+  font-size: 48px;
+}
+.unsupported-icon img {
+  width: 72px;
+  height: 72px;
+}
+.unsupported-hint {
+  color: var(--text-muted);
+}
+
+[hidden] {
+  display: none !important;
+}
