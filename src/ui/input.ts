@@ -1,8 +1,15 @@
-// Touch/mouse input on the canvas via Pointer Events.
+// Touch/mouse input on the canvas, on top of the engine's input core.
 //
-// While a shot can be taken, one finger anywhere is the slingshot: press, pull
-// back, release to fire (a short tap cancels). Two fingers orbit the camera
-// (horizontal drag) and pinch to zoom. Outside the aim phase one finger orbits.
+// While a shot can be taken, one finger (or the left mouse button) anywhere is
+// the slingshot: press, pull back, release to fire (a short tap cancels). Two
+// fingers orbit the camera (horizontal drag) and pinch to zoom. Outside the aim
+// phase one finger orbits. On a desktop, right-drag orbits and the wheel (or a
+// trackpad pinch) zooms.
+//
+// The slingshot is its own small state machine rather than a generic drag: it
+// starts on the press, not after a slop, and a second finger cancels it.
+
+import { createInput, prepareSurface, type PointerState } from "@voxolith/engine/input";
 
 export interface InputHandlers {
   /** Whether a one-finger drag should aim (true) or orbit (false) right now. */
@@ -19,78 +26,82 @@ export interface InputHandlers {
 }
 
 const FIRE_MIN_PULL = 18; // px
+const WHEEL_ZOOM = 0.0015; // per pixel
+const TRACKPAD_PINCH = 0.01; // per pixel of ctrl+wheel
 
 export function attachInput(canvas: HTMLCanvasElement, h: InputHandlers): () => void {
-  const pointers = new Map<number, { x: number; y: number; sx: number; sy: number }>();
+  const undoSurface = prepareSurface(canvas, { contextMenu: false });
+  const input = createInput(canvas);
   let mode: "none" | "aim" | "orbit" | "two" = "none";
+  let aimId = -1;
   let lastDist = 0;
   let lastMidX = 0;
 
   const viewportMin = () => Math.min(window.innerWidth, window.innerHeight);
+  const touches = (): PointerState[] => [...input.pointers().values()];
 
-  const down = (e: PointerEvent) => {
-    e.preventDefault();
-    canvas.setPointerCapture(e.pointerId);
-    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY });
-    h.press();
-    if (pointers.size === 1) {
-      if (h.canAim()) {
-        mode = "aim";
-        h.aimStart();
-      } else mode = "orbit";
-    } else if (pointers.size === 2) {
-      if (mode === "aim") h.aimEnd(false);
-      mode = "two";
-      const [a, b] = [...pointers.values()];
-      lastDist = Math.hypot(a.x - b.x, a.y - b.y);
-      lastMidX = (a.x + b.x) / 2;
+  const off = input.on((e) => {
+    if (e.kind === "wheel") {
+      h.pinch(Math.exp(-e.dy * (e.pinch ? TRACKPAD_PINCH : WHEEL_ZOOM)));
+      return;
     }
-  };
+    if (e.kind !== "pointer") return;
+    const p = e.pointer;
+    const n = input.pointers().size;
 
-  const move = (e: PointerEvent) => {
-    const p = pointers.get(e.pointerId);
-    if (!p) return;
-    p.x = e.clientX;
-    p.y = e.clientY;
-    if (mode === "aim") {
-      h.aimMove(p.x - p.sx, p.y - p.sy, viewportMin());
-    } else if (mode === "orbit" && pointers.size === 1) {
-      h.orbit(e.movementX || 0);
-    } else if (mode === "two" && pointers.size === 2) {
-      const [a, b] = [...pointers.values()];
-      const dist = Math.hypot(a.x - b.x, a.y - b.y);
-      const midX = (a.x + b.x) / 2;
-      if (lastDist > 0) h.pinch(dist / lastDist);
-      h.orbit(midX - lastMidX);
-      lastDist = dist;
-      lastMidX = midX;
+    if (e.phase === "down") {
+      h.press();
+      if (n === 1) {
+        const primary = p.type !== "mouse" || p.button === 0;
+        if (primary && h.canAim()) {
+          mode = "aim";
+          aimId = p.id;
+          h.aimStart();
+        } else mode = "orbit";
+      } else if (n === 2) {
+        if (mode === "aim") h.aimEnd(false);
+        mode = "two";
+        const [a, b] = touches();
+        lastDist = Math.hypot(a.x - b.x, a.y - b.y);
+        lastMidX = (a.x + b.x) / 2;
+      }
+      return;
     }
-  };
 
-  const up = (e: PointerEvent) => {
-    const p = pointers.get(e.pointerId);
-    pointers.delete(e.pointerId);
-    if (mode === "aim" && p) {
-      const pull = Math.hypot(p.x - p.sx, p.y - p.sy);
-      h.aimEnd(pull >= FIRE_MIN_PULL);
+    if (e.phase === "move") {
+      if (mode === "aim" && p.id === aimId) {
+        h.aimMove(p.x - p.startX, p.y - p.startY, viewportMin());
+      } else if (mode === "orbit" && n === 1) {
+        h.orbit(p.x - p.lastX);
+      } else if (mode === "two" && n === 2) {
+        const [a, b] = touches();
+        const dist = Math.hypot(a.x - b.x, a.y - b.y);
+        const midX = (a.x + b.x) / 2;
+        if (lastDist > 0) h.pinch(dist / lastDist);
+        h.orbit(midX - lastMidX);
+        lastDist = dist;
+        lastMidX = midX;
+      }
+      return;
+    }
+
+    // up / cancel (the pointer has already left the map)
+    if (mode === "aim" && p.id === aimId) {
+      const pull = Math.hypot(p.x - p.startX, p.y - p.startY);
+      h.aimEnd(e.phase === "up" && pull >= FIRE_MIN_PULL);
       mode = "none";
-    } else if (pointers.size === 0) {
+      aimId = -1;
+    } else if (n === 0) {
       mode = "none";
-    } else if (pointers.size === 1) {
+    } else if (n === 1) {
       // One finger left after a pinch: continue as orbit.
       mode = "orbit";
     }
-  };
+  });
 
-  canvas.addEventListener("pointerdown", down);
-  canvas.addEventListener("pointermove", move);
-  canvas.addEventListener("pointerup", up);
-  canvas.addEventListener("pointercancel", up);
-  canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   return () => {
-    canvas.removeEventListener("pointerdown", down);
-    canvas.removeEventListener("pointermove", move);
-    canvas.removeEventListener("pointerup", up);
-    canvas.removeEventListener("pointercancel", up);
+    off();
+    input.dispose();
+    undoSurface();
   };
 }

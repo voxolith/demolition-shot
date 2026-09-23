@@ -31,13 +31,17 @@ jobs:
         with:
           repository: voxolith/renderer
           path: renderer
+      - uses: actions/checkout@v4
+        with:
+          repository: voxolith/engine
+          path: engine
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
       - name: Create workspace root
         run: |
           cat > package.json <<'JSON'
-          { "name": "pages-workspace", "private": true, "workspaces": ["app", "renderer"] }
+          { "name": "pages-workspace", "private": true, "workspaces": ["app", "renderer", "engine"] }
           JSON
       - run: bun install
       - name: Build

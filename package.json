@@ -17,6 +17,7 @@
     "verify": "bun tools/verify.ts"
   },
   "dependencies": {
+    "@voxolith/engine": "workspace:*",
     "@voxolith/renderer": "workspace:*"
   },
   "devDependencies": {
