@@ -19,7 +19,9 @@ Siblings needed: renderer, engine.
 - `src/game/`: levels, the cannon, the structure and connectivity, physics, vfx and scoring.
 - `src/ui/`: input (the slingshot state machine, on the engine's input core), screens, audio,
   haptics and progress.
-- `src/pwa.ts`: service worker and install.
+- Offline: the engine's shared service worker, `serviceWorker()` from `@voxolith/engine/vite` in
+  `vite.config.ts` and `registerServiceWorker()` from `@voxolith/engine/pwa` in `src/main.ts`.
+  The manifest and icons in `public/` are the app's own.
 - `src/main.ts`: wiring.
 
 ## How it uses the engine

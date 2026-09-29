@@ -33,7 +33,7 @@ import { attachInput } from "./ui/input";
 import { Sfx } from "./ui/audio";
 import { Haptics } from "./ui/haptics";
 import { loadProgress, recordStars, isUnlocked, totalStars } from "./ui/progress";
-import { registerPwa } from "./pwa";
+import { registerServiceWorker } from "@voxolith/engine/pwa";
 
 const APP = "Demolition Shot";
 const BASE = import.meta.env.BASE_URL;
@@ -66,7 +66,9 @@ function norm(v: Vec3): Vec3 {
 
 async function main() {
   initTheme();
-  registerPwa();
+  // Offline play: the engine's shared worker (serviceWorker() in vite.config.ts). No update
+  // messaging: a new deploy is picked up on the next launch, as the page loads network first.
+  void registerServiceWorker();
   const canvas = document.getElementById("scene") as HTMLCanvasElement | null;
   const ui = document.getElementById("ui");
   if (!canvas || !ui) throw new Error("Missing #scene / #ui");
