@@ -31,6 +31,14 @@ export interface Plate {
 const ORIGINAL = 1;
 const RUBBLE = 2;
 
+// Marks in `visited` during a connectivity pass; it is all zero between calls.
+/** Reached by the flood in progress. */
+const SEEN = 1;
+/** Known to reach an anchor. */
+const SUPPORTED = 2;
+/** Already put in a chunk. */
+const DONE = 3;
+
 export class Structure {
   /** 0 empty, 1 original structure voxel, 2 settled rubble. Both support and can be knocked again. */
   readonly mask = new Uint8Array(VOLUME);
@@ -42,6 +50,12 @@ export class Structure {
   initial = 0;
   private readonly visited = new Uint8Array(VOLUME);
   private readonly queue = new Int32Array(VOLUME);
+  /**
+   * Voxels whose support may have changed since the last detachUnsupported():
+   * those added, and the neighbours of those removed. May hold duplicates and
+   * voxels that have gone since.
+   */
+  private readonly pending: number[] = [];
 
   constructor(private readonly plate: Plate) {}
 
@@ -49,12 +63,14 @@ export class Structure {
   load(cells: Cell[]): void {
     this.mask.fill(0);
     this.count = 0;
+    this.pending.length = 0;
     const out: StampVoxel[] = [];
     for (const v of cells) {
       if (!inGrid(v.x, v.y, v.z)) continue;
       const i = idx(v.x, v.y, v.z);
       if (this.mask[i]) continue;
       this.mask[i] = ORIGINAL;
+      this.pending.push(i);
       this.count++;
       out.push(v);
     }
@@ -73,9 +89,19 @@ export class Structure {
   }
 
   private drop(i: number): void {
-    if (this.mask[i] === ORIGINAL) this.standing--;
-    this.mask[i] = 0;
+    const { mask, pending } = this;
+    if (mask[i] === ORIGINAL) this.standing--;
+    mask[i] = 0;
     this.count--;
+    // Its neighbours may have rested on it.
+    const sx = SIZE.x, sxy = SIZE.x * SIZE.y;
+    const x = i % sx, y = ((i / sx) | 0) % SIZE.y, z = (i / sxy) | 0;
+    if (x > 0 && mask[i - 1]) pending.push(i - 1);
+    if (x < sx - 1 && mask[i + 1]) pending.push(i + 1);
+    if (y > 0 && mask[i - sx]) pending.push(i - sx);
+    if (y < SIZE.y - 1 && mask[i + sx]) pending.push(i + sx);
+    if (z > 0 && mask[i - sxy]) pending.push(i - sxy);
+    if (z < SIZE.z - 1 && mask[i + sxy]) pending.push(i + sxy);
   }
 
   /** Add settled rubble: becomes part of the structure (can support and be knocked off later). */
@@ -86,6 +112,7 @@ export class Structure {
       const i = idx(v.x, v.y, v.z);
       if (this.mask[i] || this.plate.get(v.x, v.y, v.z) !== 0) continue;
       this.mask[i] = RUBBLE;
+      this.pending.push(i);
       this.count++;
       out.push(v);
     }
@@ -164,17 +191,18 @@ export class Structure {
           if (d < best) { best = d; seed = i; }
         }
     if (seed < 0) return null;
+    // Flood the piece. `visited` is wiped through the queue afterwards (it is all
+    // zero between calls), not with a fill of the whole grid.
     const { visited, queue, mask } = this;
-    visited.fill(0);
     let head = 0, tail = 0;
-    visited[seed] = 1;
+    visited[seed] = SEEN;
     queue[tail++] = seed;
     const sx = SIZE.x, sxy = SIZE.x * SIZE.y;
     const cells: Cell[] = [];
     let anchors = 0;
     const baseY = PLATFORM.top + 1;
-    const push = (i: number) => { if (mask[i] && !visited[i]) { visited[i] = 1; queue[tail++] = i; } };
-    while (head < tail) {
+    const push = (i: number) => { if (mask[i] && !visited[i]) { visited[i] = SEEN; queue[tail++] = i; } };
+    while (head < tail && cells.length <= 6000) {
       const i = queue[head++];
       const x = i % sx, y = ((i / sx) | 0) % SIZE.y, z = (i / sxy) | 0;
       cells.push({ x, y, z, c: this.plate.get(x, y, z) });
@@ -185,8 +213,9 @@ export class Structure {
       if (y < SIZE.y - 1) push(i + sx);
       if (z > 0) push(i - sxy);
       if (z < SIZE.z - 1) push(i + sxy);
-      if (cells.length > 6000) return null; // too big to topple whole
     }
+    for (let q = 0; q < tail; q++) visited[queue[q]] = 0;
+    if (cells.length > 6000) return null; // too big to topple whole
     if (anchors === 0) return null;
     // Leverage: tall pieces on small bases tip more easily.
     let maxY = 0, mass = cells.length;
@@ -204,62 +233,103 @@ export class Structure {
   }
 
   /**
-   * Flood from the anchors (structure voxels resting on the pedestal top) through
-   * 6-connected structure voxels. Everything unreached is detached: removed from
+   * Find what no longer rests on the pedestal. Anchors are the structure voxels on
+   * the pedestal top; everything not 6-connected to one is detached: removed from
    * the structure and returned as chunks (connected components), each with a
    * centre of mass.
+   *
+   * Only the voxels changed since the last call can have come loose: a piece that
+   * was supported and is not any more lost a voxel on its path to an anchor, so it
+   * holds a neighbour of a removed voxel, and a piece that never was holds a voxel
+   * added since (`pending` collects both). Each of those is flooded until it meets
+   * an anchor or a voxel already known to be supported, so the cost follows the
+   * structure around the change rather than the grid, and a carve that removed
+   * nothing costs nothing. The chunks, their order and their voxel order are those
+   * of a scan of the whole grid (tools/verify.ts compares the two).
    */
   detachUnsupported(): Chunk[] {
+    const { pending } = this;
+    if (pending.length === 0) return [];
     const { visited, queue, mask } = this;
-    visited.fill(0);
-    let head = 0, tail = 0;
+    const sx = SIZE.x, sy = SIZE.y, sz = SIZE.z, sxy = sx * sy;
     const baseY = PLATFORM.top + 1;
-    for (let z = PLATFORM.z0; z <= PLATFORM.z1; z++)
-      for (let x = PLATFORM.x0; x <= PLATFORM.x1; x++) {
-        const i = idx(x, baseY, z);
-        if (mask[i]) {
-          visited[i] = 1;
+    const { x0, x1, z0, z1 } = PLATFORM;
+    // `queue` holds every voxel marked in this call, one flood after another, so
+    // `visited` can be wiped through it at the end instead of with a full fill.
+    let tail = 0;
+    /** Start of each unsupported component's run in `queue`, and its end. */
+    const loose: number[] = [];
+    for (let k = 0; k < pending.length; k++) {
+      const seed = pending[k];
+      if (!mask[seed] || visited[seed]) continue;
+      const start = tail;
+      let head = tail, supported = false;
+      visited[seed] = SEEN;
+      queue[tail++] = seed;
+      const push = (i: number) => {
+        const v = visited[i];
+        if (v === SUPPORTED) supported = true;
+        else if (mask[i] && !v) {
+          visited[i] = SEEN;
           queue[tail++] = i;
         }
+      };
+      while (head < tail && !supported) {
+        const i = queue[head++];
+        const x = i % sx, y = ((i / sx) | 0) % sy, z = (i / sxy) | 0;
+        if (y === baseY && x >= x0 && x <= x1 && z >= z0 && z <= z1) {
+          supported = true;
+          break;
+        }
+        if (x > 0) push(i - 1);
+        if (x < sx - 1) push(i + 1);
+        if (y > 0) push(i - sx);
+        if (y < sy - 1) push(i + sx);
+        if (z > 0) push(i - sxy);
+        if (z < sz - 1) push(i + sxy);
       }
-    const sx = SIZE.x, sxy = SIZE.x * SIZE.y;
-    const push = (i: number) => {
-      if (mask[i] && !visited[i]) {
-        visited[i] = 1;
-        queue[tail++] = i;
-      }
-    };
-    while (head < tail) {
-      const i = queue[head++];
-      const x = i % sx, y = ((i / sx) | 0) % SIZE.y, z = (i / sxy) | 0;
-      if (x > 0) push(i - 1);
-      if (x < sx - 1) push(i + 1);
-      if (y > 0) push(i - sx);
-      if (y < SIZE.y - 1) push(i + sx);
-      if (z > 0) push(i - sxy);
-      if (z < SIZE.z - 1) push(i + sxy);
+      if (supported) for (let q = start; q < tail; q++) visited[queue[q]] = SUPPORTED;
+      else loose.push(start, tail); // ran out without an anchor: the whole component
     }
+    pending.length = 0;
 
-    // Group the unreached voxels into components.
+    // The full scan met each component at its lowest index, in index order.
+    const order: { first: number; start: number; end: number }[] = [];
+    for (let k = 0; k < loose.length; k += 2) {
+      const start = loose[k], end = loose[k + 1];
+      let first = queue[start];
+      for (let q = start + 1; q < end; q++) if (queue[q] < first) first = queue[q];
+      order.push({ first, start, end });
+    }
+    order.sort((a, b) => a.first - b.first);
+
     const chunks: Chunk[] = [];
     const carve: StampVoxel[] = [];
-    for (let i = 0; i < VOLUME; i++) {
-      if (!mask[i] || visited[i]) continue;
+    for (const { first, start, end } of order) {
+      // Flood the component again from that voxel, for the scan's voxel order. It
+      // visits the same voxels, so it can reuse the component's run of the queue.
       const cells: Cell[] = [];
-      visited[i] = 1;
-      head = 0; tail = 0;
-      queue[tail++] = i;
-      while (head < tail) {
+      let head = start, t = start;
+      visited[first] = DONE;
+      queue[t++] = first;
+      const push = (i: number) => {
+        if (visited[i] === SEEN) {
+          visited[i] = DONE;
+          queue[t++] = i;
+        }
+      };
+      while (head < t) {
         const j = queue[head++];
-        const x = j % sx, y = ((j / sx) | 0) % SIZE.y, z = (j / sxy) | 0;
+        const x = j % sx, y = ((j / sx) | 0) % sy, z = (j / sxy) | 0;
         cells.push({ x, y, z, c: this.plate.get(x, y, z) });
         if (x > 0) push(j - 1);
         if (x < sx - 1) push(j + 1);
         if (y > 0) push(j - sx);
-        if (y < SIZE.y - 1) push(j + sx);
+        if (y < sy - 1) push(j + sx);
         if (z > 0) push(j - sxy);
-        if (z < SIZE.z - 1) push(j + sxy);
+        if (z < sz - 1) push(j + sxy);
       }
+      if (t !== end) throw new Error("detachUnsupported: component changed between floods");
       let mx = 0, my = 0, mz = 0;
       for (const c of cells) { mx += c.x + 0.5; my += c.y + 0.5; mz += c.z + 0.5; }
       const n = cells.length;
@@ -271,6 +341,9 @@ export class Structure {
       }
       chunks.push({ local: cells.map((c) => ({ x: c.x - ox, y: c.y - oy, z: c.z - oz, c: c.c })), com: [ox + 0.5, oy + 0.5, oz + 0.5] });
     }
+    for (let q = 0; q < tail; q++) visited[queue[q]] = 0;
+    // Whole components left, so nothing next to them is still standing.
+    pending.length = 0;
     if (carve.length) this.plate.write(carve);
     return chunks;
   }

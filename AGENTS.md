@@ -27,11 +27,14 @@ Siblings needed: renderer, engine.
 ## How it uses the engine
 
 - One dense `128 × 96 × 128` grid. The pedestal, the structure and settled rubble live in the
-  stamper's base plate. Everything that moves is stamped each frame and uploaded as one dirty box
-  (`GridStamper`, `OccupancyGrid.updateBox`). Permanent edits go through `GridStamper.writeBase`.
+  stamper's base plate (`GridStamper`). Everything that moves is stamped each frame by
+  `Game.composite()`, which returns the bricks that changed (movers and base edits) for one
+  `renderer.editMany`; never one box around all of it, which spans the arena. Permanent edits go
+  through `GridStamper.writeBase`.
 - Ball flight and the aim preview use the CPU `voxelRaycast`.
-- Collapse is connectivity: a flood fill from the voxels resting on the pedestal finds what is
-  unsupported.
+- Collapse is connectivity: what is not connected to a voxel resting on the pedestal falls.
+  `detachUnsupported()` floods only from the voxels changed since its last call; `verify` holds it
+  to a scan of the whole grid.
 - Keep it phone-first. Test touch (pull, tap to cancel, two-finger orbit, pinch) on a real phone
   when you change input or layout, and keep the frame on demand outside flights.
 

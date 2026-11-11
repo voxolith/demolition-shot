@@ -1,8 +1,8 @@
 // Demolition Shot — a mobile voxel demolition game on @voxolith/renderer.
 //
 // Boot the GPU, wrap the headless Game with rendering (one dense grid, movers
-// stamped each frame, permanent edits uploaded as dirty boxes), input, UI,
-// sound, haptics and progress.
+// stamped each frame, only the bricks they and permanent edits touch uploaded),
+// input, UI, sound, haptics and progress.
 
 import "./styles.css";
 import {
@@ -15,12 +15,9 @@ import {
   makePerf,
   makeFrameLoop,
   observeResize,
-  OccupancyGrid,
   QUALITY_PRESETS,
   type QualityPreset,
   type Renderer,
-  type StampVoxel,
-  type DirtyBox,
   type Vec3,
 } from "@voxolith/renderer";
 import { initTheme } from "./brand/theme";
@@ -140,13 +137,24 @@ async function main() {
   renderer.setClipBounds([0, 0, 0], [SIZE.x - 1, SIZE.y - 1, SIZE.z - 1]);
   renderer.setFloor({ enabled: true, y: 0, colorA: [0.42, 0.46, 0.36], colorB: [0.36, 0.4, 0.31] });
   renderer.setQuality(QUALITY_PRESETS[quality]);
-  const occupancy = new OccupancyGrid(SIZE, game.stamper.liveData);
-  renderer.updateCoarse(occupancy.data);
 
-  const uploadAll = () => {
-    occupancy.rebuildAll(game.stamper.liveData);
-    renderer.updateVoxels(game.stamper.liveData);
-    renderer.updateCoarse(occupancy.data);
+  const live = game.stamper.liveData;
+  const uploadAll = () => renderer.updateVoxels(live);
+  /** `editMany` fill: bring one brick up to date with the composited grid. */
+  const fromLive = (cells: Uint8Array, ox: number, oy: number, oz: number): boolean => {
+    let changed = false;
+    for (let lz = 0, o = 0; lz < 8; lz++)
+      for (let ly = 0; ly < 8; ly++) {
+        const row = ox + (oy + ly) * SIZE.x + (oz + lz) * SIZE.x * SIZE.y;
+        for (let lx = 0; lx < 8; lx++, o++) {
+          const v = live[row + lx];
+          if (cells[o] !== v) {
+            cells[o] = v;
+            changed = true;
+          }
+        }
+      }
+    return changed;
   };
 
   // --- Camera ----------------------------------------------------------------
@@ -165,7 +173,6 @@ async function main() {
     minScale: gpu.software ? 0.25 : 0.4,
     label: `${adapterName}${gpu.software ? " (software)" : ""}`,
   });
-  const movers: StampVoxel[] = [];
   const loop = makeFrameLoop({
     render(now, dt) {
       perf.frame(now);
@@ -175,14 +182,8 @@ async function main() {
       game.step(dt);
       sfx.rumble(Math.min(1, (game.sim.chunks.length * 6 + game.sim.debris.length) / 240));
 
-      movers.length = 0;
-      game.movers(movers);
-      const box = game.stamper.stamp(movers);
-      const dirty = union(box, game.takeDirtyBase());
-      if (dirty) {
-        renderer.updateVoxels(game.stamper.liveData, dirty);
-        renderer.updateCoarse(occupancy.data, occupancy.updateBox(game.stamper.liveData, dirty));
-      }
+      // Only the bricks something moved through or edited, in one upload.
+      renderer.editMany(game.composite(), fromLive);
       renderer.render({ ...camera(180 + orbitYaw, distance, target), ...ENV });
       loop.setContinuous(game.animating());
     },
@@ -324,12 +325,6 @@ async function main() {
     showTitle();
   }
   loop.invalidate();
-}
-
-function union(a: DirtyBox | null, b: DirtyBox | null): DirtyBox | null {
-  if (!a) return b;
-  if (!b) return a;
-  return { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), z0: Math.min(a.z0, b.z0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1), z1: Math.max(a.z1, b.z1) };
 }
 
 main().catch((err) => {

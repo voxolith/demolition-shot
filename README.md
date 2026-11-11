@@ -31,7 +31,7 @@ knocking the target percentage of the structure off the platform. Three stars fo
 
 - One dense `128 × 96 × 128` grid. The pedestal, the structure and settled rubble live in the
   stamper's base plate; the cannon, the ball, flying chunks, debris and dust are stamped each frame
-  and uploaded as one dirty box (`GridStamper`, `OccupancyGrid.updateBox`).
+  and only the bricks they touch are uploaded (`GridStamper`, `Renderer.editMany`).
 - Permanent edits (carving, rubble) go through `GridStamper.writeBase`, no full re-upload.
 - Ball flight and the aim preview use the CPU `voxelRaycast`.
 - Collapse is connectivity: after each impact a flood fill from the voxels resting on the pedestal

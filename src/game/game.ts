@@ -3,7 +3,7 @@
 // directly, and main.ts wraps it with rendering, input and UI.
 
 import { GridStamper, seededRandom, hashSeed, type DirtyBox, type StampVoxel, type Vec3 } from "@voxolith/renderer/core";
-import { SIZE, PLATFORM_CENTER, buildPlate, buildPalette, setPlatformHalf } from "./world";
+import { SIZE, PLATFORM_CENTER, buildPlate, buildPalette, inGrid, setPlatformHalf } from "./world";
 import { Structure, type Cell, type Plate } from "./structure";
 import { addChunks, fireBall, moverVoxels, simActive, spawnDebris, stepSim, type WorldSim, type ImpactEvent } from "./physics";
 import { aimDir, aimSpeed, cannonVoxels, muzzle, previewVoxels, DEFAULT_AIM, type Aim } from "./cannon";
@@ -27,6 +27,9 @@ const TOPPLE_STRENGTH = 8;
 const CHAIN_SPEED = 9;
 const SETTLE_CAP = 7; // seconds before a shot is evaluated regardless
 const SETTLE_QUIET = 0.6; // seconds of no movement before evaluating
+/** The renderer's brick edge: uploads are per 8³ brick, and the grid is a whole number of them. */
+const BRICK = 8;
+const BRICKS_X = SIZE.x / BRICK, BRICKS_Y = SIZE.y / BRICK, BRICKS_Z = SIZE.z / BRICK;
 
 export class Game {
   readonly base: Uint8Array;
@@ -44,8 +47,18 @@ export class Game {
   ballsUsed = 0;
   private settleTime = 0;
   private quietTime = 0;
-  private dirtyBase: DirtyBox | null = null;
   private accumulator = 0;
+  /** Bricks whose voxels changed since the last composite(): a flag per brick, and the flagged ones. */
+  private readonly brickDirty = new Uint8Array(BRICKS_X * BRICKS_Y * BRICKS_Z);
+  private dirtyBricks: number[] = [];
+  /** Grid indices of the voxels the last composite() stamped, to restore from the base. */
+  private stamped = new Int32Array(2048);
+  private stampedCount = 0;
+  private readonly frameMovers: StampVoxel[] = [];
+  /** The cannon's voxels, rebuilt when the aim's yaw or pitch changes. */
+  private cannon: StampVoxel[] = [];
+  private cannonYaw = NaN;
+  private cannonPitch = NaN;
 
   constructor(private readonly hooks: GameHooks = {}) {
     this.base = buildPlate();
@@ -54,8 +67,8 @@ export class Game {
       data: this.base,
       get: (x, y, z) => this.stamper.baseAt(x, y, z),
       write: (voxels: StampVoxel[]) => {
-        const b = this.stamper.writeBase(voxels);
-        if (b) this.dirtyBase = union(this.dirtyBase, b);
+        this.stamper.writeBase(voxels);
+        for (const v of voxels) if (inGrid(v.x, v.y, v.z)) this.markBrick(v.x, v.y, v.z);
       },
     };
     this.structure = new Structure(this.plate);
@@ -100,7 +113,10 @@ export class Game {
     this.ballsUsed = 0;
     this.aim = { ...DEFAULT_AIM };
     this.aiming = false;
-    this.dirtyBase = null; // main re-uploads the whole grid after a load
+    // setBase() dropped what was stamped, and main re-uploads the whole grid after a load.
+    this.stampedCount = 0;
+    for (const b of this.dirtyBricks) this.brickDirty[b] = 0;
+    this.dirtyBricks.length = 0;
     this.accumulator = 0;
     this.setPhase("aim");
     return buildPalette(built.palette);
@@ -219,7 +235,13 @@ export class Game {
 
   /** Everything to stamp this frame: cannon, aim preview, movers, particles. */
   movers(out: StampVoxel[]): void {
-    cannonVoxels(this.aim, out);
+    if (this.aim.yawDeg !== this.cannonYaw || this.aim.pitchDeg !== this.cannonPitch) {
+      this.cannon.length = 0;
+      cannonVoxels(this.aim, this.cannon);
+      this.cannonYaw = this.aim.yawDeg;
+      this.cannonPitch = this.aim.pitchDeg;
+    }
+    for (const v of this.cannon) out.push(v);
     if (this.phase === "aim" && this.aiming) previewVoxels(this.aim, this.base, out);
     moverVoxels(this.sim, out);
     this.vfx.voxels(out);
@@ -230,15 +252,54 @@ export class Game {
     return this.phase === "flying" || this.phase === "settling" || this.aiming || this.vfx.active;
   }
 
-  /** Base edits since the last call (carving, rubble), for a partial upload. */
-  takeDirtyBase(): DirtyBox | null {
-    const b = this.dirtyBase;
-    this.dirtyBase = null;
-    return b;
-  }
-}
+  /**
+   * Compose this frame into the stamper's `liveData`: put back what the last
+   * frame stamped, then stamp movers(). Returns the bricks to upload, as one box
+   * each: those a mover left or entered, and those a base edit (carving, rubble)
+   * touched since the last call. Empty when nothing changed.
+   *
+   * `liveData` ends up exactly as `GridStamper.stamp(movers)` leaves it. That
+   * restores and reports one box around everything, though, which here spans the
+   * arena (the cannon at one end, the structure at the other) and has the
+   * renderer rebuild every brick in between; this touches only the cells stamped.
+   */
+  composite(): DirtyBox[] {
+    const live = this.stamper.liveData, base = this.base;
+    const sx = SIZE.x, sxy = SIZE.x * SIZE.y;
+    let stamped = this.stamped;
+    for (let k = 0; k < this.stampedCount; k++) {
+      const i = stamped[k];
+      live[i] = base[i];
+      this.markBrick(i % sx, ((i / sx) | 0) % SIZE.y, (i / sxy) | 0);
+    }
+    const movers = this.frameMovers;
+    movers.length = 0;
+    this.movers(movers);
+    if (movers.length > stamped.length) stamped = this.stamped = new Int32Array(movers.length * 2);
+    let n = 0;
+    for (const v of movers) {
+      if (!inGrid(v.x, v.y, v.z)) continue;
+      const i = v.x + v.y * sx + v.z * sxy;
+      live[i] = v.c;
+      stamped[n++] = i;
+      this.markBrick(v.x, v.y, v.z);
+    }
+    this.stampedCount = n;
 
-function union(a: DirtyBox | null, b: DirtyBox): DirtyBox {
-  if (!a) return b;
-  return { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), z0: Math.min(a.z0, b.z0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1), z1: Math.max(a.z1, b.z1) };
+    const boxes: DirtyBox[] = [];
+    for (const b of this.dirtyBricks) {
+      this.brickDirty[b] = 0;
+      const x0 = (b % BRICKS_X) * BRICK, y0 = (((b / BRICKS_X) | 0) % BRICKS_Y) * BRICK, z0 = ((b / (BRICKS_X * BRICKS_Y)) | 0) * BRICK;
+      boxes.push({ x0, y0, z0, x1: x0 + BRICK - 1, y1: y0 + BRICK - 1, z1: z0 + BRICK - 1 });
+    }
+    this.dirtyBricks.length = 0;
+    return boxes;
+  }
+
+  private markBrick(x: number, y: number, z: number): void {
+    const b = ((x / BRICK) | 0) + ((y / BRICK) | 0) * BRICKS_X + ((z / BRICK) | 0) * BRICKS_X * BRICKS_Y;
+    if (this.brickDirty[b]) return;
+    this.brickDirty[b] = 1;
+    this.dirtyBricks.push(b);
+  }
 }
