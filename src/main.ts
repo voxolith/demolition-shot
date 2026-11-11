@@ -34,6 +34,7 @@ import { Sfx } from "./ui/audio";
 import { Haptics } from "./ui/haptics";
 import { loadProgress, recordStars, isUnlocked, totalStars } from "./ui/progress";
 import { registerServiceWorker } from "@voxolith/engine/pwa";
+import { classicSky, classicSkyParams } from "@voxolith/engine/atmosphere";
 
 const APP = "Demolition Shot";
 const BASE = import.meta.env.BASE_URL;
@@ -48,15 +49,18 @@ const ENV = {
   lightColor: [1.0, 0.96, 0.9] as Vec3,
   ambientSky: [0.52, 0.56, 0.66] as Vec3,
   ambientGround: [0.34, 0.3, 0.26] as Vec3,
-  sunDir: SUN,
-  moonDir: [0, -1, 0] as Vec3,
-  sunColor: [1, 0.95, 0.85] as Vec3,
-  moonColor: [0, 0, 0] as Vec3,
-  skyTop: [0.36, 0.55, 0.88] as Vec3,
-  skyHorizon: [0.8, 0.86, 0.94] as Vec3,
-  nightFactor: 0,
-  sunIntensity: 1,
-  moonIntensity: 0,
+  // The classic sky (renderer created with `background: classicSky`), packed once: it never changes.
+  background: classicSkyParams({
+    sunDir: SUN,
+    moonDir: [0, -1, 0] as Vec3,
+    sunColor: [1, 0.95, 0.85] as Vec3,
+    moonColor: [0, 0, 0] as Vec3,
+    skyTop: [0.36, 0.55, 0.88] as Vec3,
+    skyHorizon: [0.8, 0.86, 0.94] as Vec3,
+    nightFactor: 0,
+    sunIntensity: 1,
+    moonIntensity: 0,
+  }),
 };
 
 function norm(v: Vec3): Vec3 {
@@ -132,7 +136,7 @@ async function main() {
   });
 
   const palette0 = game.loadLevel(levels[0], 0);
-  const renderer: Renderer = await createRenderer(gpu, { size: SIZE, data: game.stamper.liveData, palette: palette0 });
+  const renderer: Renderer = await createRenderer(gpu, { size: SIZE, data: game.stamper.liveData, palette: palette0 }, { background: classicSky });
   renderer.setClipBounds([0, 0, 0], [SIZE.x - 1, SIZE.y - 1, SIZE.z - 1]);
   renderer.setFloor({ enabled: true, y: 0, colorA: [0.42, 0.46, 0.36], colorB: [0.36, 0.4, 0.31] });
   renderer.setQuality(QUALITY_PRESETS[quality]);
