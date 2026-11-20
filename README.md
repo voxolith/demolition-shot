@@ -8,7 +8,8 @@
 # Demolition Shot
 
 Aim, release, watch it crumble. A mobile-first voxel demolition game and the showcase for
-[`@voxolith/renderer`](https://github.com/voxolith/renderer), the WebGPU voxel raymarcher.
+[`@voxolith/renderer`](https://github.com/voxolith/renderer), the WebGPU voxel raymarcher, and
+[`@voxolith/engine`](https://github.com/voxolith/engine).
 
 **Play:** <https://voxolith.github.io/demolition-shot/> (installable: Add to Home Screen)
 
@@ -56,7 +57,7 @@ and its palette is remapped automatically.
 ## Development
 
 ```sh
-bun install
+bun install        # from the workspace root, not from this folder
 bun run dev        # https://localhost:5173 (open the LAN https URL on your phone, accept the cert)
 bun run verify     # headless simulation checks, no GPU
 bun run build
@@ -65,8 +66,8 @@ bun run build
 Debug URL params: `?level=3` opens a level directly, `&auto=aim` shows the aim preview,
 `&auto=fire` fires a shot immediately, `?perf` shows the frame-time overlay and the adapter.
 
-This repo depends on `@voxolith/renderer` as `workspace:*`; clone it next to this folder and
-`bun install` from a workspace root that lists both. The UI colours come from the Voxolith brand tokens
+This repo depends on `@voxolith/renderer` and `@voxolith/engine` as `workspace:*`; clone both next to
+this folder and `bun install` from a workspace root that lists all three. The UI colours come from the Voxolith brand tokens
 (`src/brand/`, generated from the private branding repo).
 
 ## Deploy
